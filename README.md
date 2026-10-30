@@ -13,7 +13,9 @@ It's made for a phone held sideways, and it works on a computer too.
   - If Miss Trunchbull is close, it knocks her dizzy for a few seconds, and a nearby water jug flies at her too.
   - Otherwise it floats crates out of the way, which opens up hidden corners with books in them.
   - The ring around the button fills up again after each use. On a computer, press Space.
-- **Hide:** walk into a wardrobe (they glow faintly green). Miss Trunchbull can't see you in there, and you can peek out through the gap in the doors. Walk out again whenever you like.
+- **Hide:** walk into a wicker basket (they glow faintly green). Miss Trunchbull can't see you in there.
+  - You peek out through a gap in the weave. Drag on the left to look left and right.
+  - When it's safe, press the big green **GET OUT** button, which replaces POWER while you're hiding. On a computer, press Space. Matilda hops out on the side you were looking at.
 - **Books:** collect every glowing book in a level. Then the padlock on the exit door turns green, and you can escape.
 - **Fairy light:** a little floating light always leads the way to the next book, or to the door.
 - **Pumpkins:** walk past a pumpkin to light it. That's your checkpoint. If Miss Trunchbull catches you, you go back to the last lit pumpkin and keep the books you've found.
@@ -21,6 +23,8 @@ It's made for a phone held sideways, and it works on a computer too.
 Miss Trunchbull patrols the level. If she spots you, her eyes glow red, her face in the top corner turns red, and you'll hear her stomping and your heartbeat. Run, hide or use your POWER. If you get away, she searches for a bit, grumbles and goes back to patrolling.
 
 ## Levels
+
+Every time a level starts, it gets a new layout: the maze, the rooms, the books, the baskets, the pumpkins and Miss Trunchbull's patrol are all made up fresh. Each layout is checked, so every book and the door can always be reached, and one book is always tucked behind a crate that needs the POWER.
 
 1. **The Playground at Midnight:** a hedge maze outside, with 3 books and helpful tips.
 2. **The Creaky Corridors:** classrooms and corridors, with 5 books.
@@ -39,9 +43,9 @@ It's a static site with no build step:
 |---|---|
 | `index.html` | Page, HUD, touch controls and screens |
 | `src/game.js` | Game logic, camera, controls, Miss Trunchbull's patrol and chase |
-| `src/levels.js` | The three levels, drawn as text maps |
+| `src/levels.js` | The three levels and the random layout generator |
 | `src/characters.js` | Matilda and Miss Trunchbull |
-| `src/props.js` | School props: wardrobes, desks, books, doors and more |
+| `src/props.js` | School props: baskets, desks, books, doors and more |
 | `src/models.js` | Halloween props: pumpkins, trees, bats and toadstools |
 | `src/materials.js` | Shared materials, glows and mesh merging |
 | `src/audio.js` | Sound effects and the spooky drone |

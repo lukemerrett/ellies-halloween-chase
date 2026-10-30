@@ -30,7 +30,31 @@
   }
   #game { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
   #vignette { position: absolute; inset: 0; pointer-events: none; background: radial-gradient(ellipse at center, transparent 50%, rgba(5,2,10,0.75)); transition: background 0.4s; }
-  body.hiding #vignette { background: radial-gradient(ellipse at center, transparent 25%, rgba(5,2,10,0.92)); }
+  /* inside a basket: looking out through a slot in the weave */
+  #peek { position: absolute; inset: 0; pointer-events: none; display: none; }
+  body.hiding #peek { display: block; animation: fadein 0.35s; }
+  body.hiding #vignette { opacity: 0; }
+  #peek .weave { position: absolute; left: 0; right: 0; background-color: #3a2412;
+    background-image:
+      repeating-linear-gradient(90deg, rgba(0,0,0,0.55) 0 5px, transparent 5px 46px),
+      repeating-linear-gradient(0deg, #8a5a2c 0 9px, #6b4220 9px 16px, #2a170a 16px 19px);
+    box-shadow: inset 0 0 40px rgba(0,0,0,0.85); }
+  #peek .top { top: 0; height: 19%; border-bottom: 6px solid #2a170a; border-radius: 0 0 46% 46% / 0 0 34px 34px; }
+  #peek .bot { bottom: 0; height: 23%; border-top: 6px solid #2a170a; border-radius: 46% 46% 0 0 / 34px 34px 0 0; }
+  #peek .gap { position: absolute; left: 0; right: 0; top: 18%; bottom: 22%; box-shadow: inset 0 0 70px 30px rgba(10,5,2,0.9); }
+  #outBtn {
+    position: absolute; right: calc(18px + var(--safe-r)); bottom: calc(var(--vh) * 6);
+    width: min(150px, calc(var(--vh) * 36)); height: min(150px, calc(var(--vh) * 36)); border-radius: 50%; padding: 0;
+    border: 0.8vh solid rgba(255,255,255,0.8); color: #0e2a0a;
+    background: radial-gradient(circle at 38% 32%, #d4ffb8, #44c42c 60%, #17660f); box-shadow: 0 0 26px rgba(93,255,58,0.7);
+    display: none; flex-direction: column; align-items: center; justify-content: center; -webkit-tap-highlight-color: transparent;
+    animation: pulse 1.4s ease-in-out infinite;
+  }
+  #outBtn svg { width: 46%; height: 40%; }
+  #outBtn span { font-weight: 800; font-size: clamp(12px, 4vh, 19px); line-height: 1; letter-spacing: 0.04em; }
+  body.playing.hiding #outBtn { display: flex; }
+  body.playing.hiding #powerBtn { display: none; }
+  #outBtn.bump { animation: bump 0.3s; }
   #flash { position: absolute; inset: 0; pointer-events: none; background: #dfe6ff; opacity: 0; }
   #bubbles { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
   .bubble {
@@ -121,7 +145,7 @@
   .howto div { display: flex; align-items: center; gap: 0.5em; }
   .howto i { display: inline-block; width: 1.6em; height: 1.6em; border-radius: 50%; background: radial-gradient(circle at 40% 35%, #e9d6ff, #8a4ad6); }
   .howto i.p { background: radial-gradient(circle at 38% 32%, #e2b8ff, #6b24b0 60%, #2a0a4a); box-shadow: 0 0 8px #b05cff; }
-  .howto i.w { border-radius: 4px; background: #6b4a2e; }
+  .howto i.w { border-radius: 30% 30% 45% 45%; background: repeating-linear-gradient(0deg, #a06a34 0 3px, #5a3416 3px 5px); }
   .credit { position: absolute; bottom: 2vh; font-size: min(3vh, 2vw); opacity: 0.45; }
   #caught { position: absolute; inset: 0; z-index: 15; display: none; align-items: center; justify-content: center; background: radial-gradient(ellipse at center, rgba(120,10,10,0.35), rgba(30,0,0,0.85)); pointer-events: none; }
   #caught.show { display: flex; animation: fadein 0.25s; }
@@ -140,6 +164,7 @@
 <body>
 <canvas id="game"></canvas>
 <div id="vignette"></div>
+<div id="peek"><div class="weave top"></div><div class="gap"></div><div class="weave bot"></div></div>
 <div id="flash"></div>
 <div id="bubbles"></div>
 
@@ -161,6 +186,11 @@
   </div>
 </button>
 
+<button id="outBtn" aria-label="Climb out of the basket">
+  <svg viewBox="0 0 24 20"><path d="M12 1 L22 11 H16 V19 H8 V11 H2 Z" fill="#0e2a0a"/></svg>
+  <span>GET OUT</span>
+</button>
+
 <div id="caught"><div>Caught!<small>Back to the last pumpkin…</small></div></div>
 
 <div class="screen show" id="start">
@@ -171,7 +201,7 @@
   <div class="howto">
     <div><i></i> Drag on the left to walk</div>
     <div><i class="p"></i> POWER moves things and stops Miss Trunchbull</div>
-    <div><i class="w"></i> Hide in wardrobes</div>
+    <div><i class="w"></i> Hide in baskets</div>
   </div>
   <div id="loading">Unlocking the school…</div>
   <div class="credit">An unofficial fan game, made for Ellie. Matilda is by Roald Dahl.</div>

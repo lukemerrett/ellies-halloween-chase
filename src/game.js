@@ -5,7 +5,7 @@ import * as MD from './models.js';
 import * as CH from './characters.js';
 import * as PR from './props.js';
 import { initAudio, play, setMuted, startDrone, setDrone } from './audio.js';
-import { LEVELS } from './levels.js';
+import { LEVELS, generateMap } from './levels.js';
 
 const TILE = 3, WALL_H = 4.2;
 const RUN = 5.0, M_R = 0.38, T_R = 0.6;
@@ -112,13 +112,13 @@ const grassTex = canvasTex(256, 256, (g, w, h) => {
 // ---------------------------------------------------------------------------
 const G = {
   level: 0, lv: null, grid: [], W: 0, H: 0, root: null,
-  books: [], booksGot: 0, checkpoints: [], cpTile: null, exit: null, crates: [], jugs: [], cupboards: [], lamps: [], windows: [], paintings: [], swings: [],
-  waypoints: [], playing: false, paused: false, time: 0, grace: 0, frozen: 0, power: 0, hidden: false, hideT: 0,
+  books: [], booksGot: 0, checkpoints: [], cpTile: null, exit: null, crates: [], jugs: [], baskets: [], lamps: [], windows: [], paintings: [], swings: [],
+  waypoints: [], playing: false, paused: false, time: 0, grace: 0, frozen: 0, power: 0, hidden: false, hideB: null, hideCool: 0, hideCount: 0, peekYaw: 0, seed: 0, outT: -9,
   unlocked: false, done: false, angry: false, tipsShown: new Set(), nextThunder: 10, flash: 0, nextBats: 6,
 };
-const M = { obj: null, pos: new THREE.Vector3(), yaw: 0, speed: 0, phase: 0, glow: 0, light: null, stepAcc: 0 };
+const M = { obj: null, pos: new THREE.Vector3(), yaw: 0, speed: 0, phase: 0, glow: 0, light: null, stepAcc: 0, hopT: 0, hopFrom: new THREE.Vector3() };
 const T = { obj: null, pos: new THREE.Vector3(), yaw: 0, state: 'patrol', wp: 0, path: [], pathT: 0, seeT: 0, lost: 0, lastSeen: new THREE.Vector3(), searchT: 0, stun: 0, phase: 0, stepAcc: 0, red: 0, sayT: -9 };
-const camState = { yaw: 0, pos: new THREE.Vector3(), look: new THREE.Vector3(), shake: 0 };
+const camState = { yaw: 0, pos: new THREE.Vector3(), look: new THREE.Vector3(), shake: 0, snap: false };
 
 // ---------------------------------------------------------------------------
 // Grid helpers
@@ -183,14 +183,16 @@ function openSides(tx, tz) {
 // yaw that turns a model's +z towards the given neighbour direction
 const yawTo = (dx, dz) => Math.atan2(dx, dz);
 
-function buildLevel(i) {
+function buildLevel(i, seed = Math.floor(Math.random() * 2 ** 31)) {
   if (G.root) scene.remove(G.root);
   anim.length = 0;
-  const lv = LEVELS[i];
-  G.level = i; G.lv = lv;
+  // a fresh layout every time the level starts
+  const lv = { ...LEVELS[i], map: generateMap(LEVELS[i], seed) };
+  G.level = i; G.lv = lv; G.seed = seed;
   G.grid = lv.map.map((r) => r.split(''));
   G.H = G.grid.length; G.W = G.grid[0].length;
-  Object.assign(G, { books: [], booksGot: 0, checkpoints: [], crates: [], jugs: [], cupboards: [], lamps: [], windows: [], paintings: [], swings: [], waypoints: [], unlocked: false, done: false, angry: false, power: 0, grace: 0, hidden: false });
+  Object.assign(G, { books: [], booksGot: 0, checkpoints: [], crates: [], jugs: [], baskets: [], lamps: [], windows: [], paintings: [], swings: [], waypoints: [], unlocked: false, done: false, angry: false, power: 0, grace: 0, hidden: false, hideB: null, hideCool: 0 });
+  document.body.classList.remove('hiding');
   const root = new THREE.Group();
   G.root = root;
   scene.add(root);
@@ -259,15 +261,21 @@ function buildLevel(i) {
       const sp = makeGlow('#c084ff', 3, 0); sp.position.set(0, 2.8, 0); cr.add(sp);
       G.crates.push({ obj: cr, tile: [x, z], gone: false, sparkle: sp });
     } else if (c === 'H') {
-      // the wardrobe stands against a wall at the back of its square, facing into the room
-      const walls4 = [[0, -1], [1, 0], [0, 1], [-1, 0]].filter(([dx, dz]) => blocked(x + dx, z + dz));
-      const back = walls4[0] || [0, -1];
-      const cb = PR.makeCupboard();
-      cb.position.set(p.x + back[0] * (TILE / 2 - 0.6), 0, p.z + back[1] * (TILE / 2 - 0.6));
-      cb.rotation.y = yawTo(-back[0], -back[1]);
-      root.add(cb);
-      const glow = makeGlow('#7cff9a', 3.4, 0.25); glow.position.set(0, 1.6, 0.4); cb.add(glow);
-      G.cupboards.push({ obj: cb, tile: [x, z], inside: cb.position.clone(), open: 0.25, glow });
+      // a basket to hide in, turned to face the longest clear view so Matilda can peek out at the room
+      let dir = [0, 1], run = -1;
+      for (const [dx, dz] of [[0, -1], [1, 0], [0, 1], [-1, 0]]) {
+        let n = 0;
+        while (n < 8 && !opaque(x + dx * (n + 1), z + dz * (n + 1))) n++;
+        if (n > run) { run = n; dir = [dx, dz]; }
+      }
+      const bk = PR.makeBasket();
+      flatten(bk, [bk.userData.lid, bk.userData.glow]);
+      bk.position.set(p.x - dir[0] * 0.3, 0, p.z - dir[1] * 0.3);
+      bk.rotation.y = yawTo(...dir);
+      root.add(bk);
+      let glow = bk.userData.glow;
+      if (!glow) { glow = makeGlow('#7cff9a', 2.6, 0.25); glow.position.set(0, 1.2, 0); bk.add(glow); }
+      G.baskets.push({ obj: bk, tile: [x, z], open: 0, glow });
     } else if (c === 'B') {
       const b = flatten(PR.makeBook(G.books.length));
       b.position.set(p.x, 0.9, p.z);
@@ -298,6 +306,8 @@ function buildLevel(i) {
     if (c === 'M') { M.pos.copy(p); M.yaw = open.length ? yawTo(...open[0]) : 0; }
     if (c === 'T') { T.pos.copy(p); }
   }));
+  // so the room around a basket doesn't merge into it
+  for (const b of G.baskets) b.obj.updateMatrixWorld(true);
   G.waypoints = G.waypoints.filter(Boolean);
 
   // decorations on the walls: windows, creepy portraits, cobwebs and lamps
@@ -396,7 +406,7 @@ function buildLevel(i) {
     G.wisp.add(G.wispCore);
   }
   root.add(M.obj, T.obj, G.wisp);
-  M.obj.position.copy(M.pos); M.obj.rotation.y = M.yaw; M.obj.visible = true;
+  M.obj.position.copy(M.pos); M.obj.rotation.y = M.yaw; showMatilda(true);
   resetTrunchbull(true);
   camState.yaw = M.yaw;
   camState.pos.copy(M.pos).add(new THREE.Vector3(-Math.sin(M.yaw) * 3.5, 2.4, -Math.cos(M.yaw) * 3.5));
@@ -481,7 +491,8 @@ function showJoy(active) {
 }
 window.addEventListener('keydown', (e) => {
   keys.add(e.key.toLowerCase());
-  if (e.key === ' ' && G.playing) { e.preventDefault(); usePower(); }
+  if (e.key === ' ' && G.playing) { e.preventDefault(); if (G.hidden) leaveBasket(); else usePower(); }
+  if ((e.key === 'Enter' || e.key.toLowerCase() === 'e') && G.playing && G.hidden) leaveBasket();
   if (e.key === 'Escape' && G.playing) setPaused(!G.paused);
 });
 window.addEventListener('keyup', (e) => keys.delete(e.key.toLowerCase()));
@@ -497,6 +508,8 @@ function inputVector() {
 }
 const powerBtn = document.getElementById('powerBtn');
 powerBtn.addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); initAudio(); if (G.playing && !G.paused) usePower(); });
+const outBtn = document.getElementById('outBtn');
+outBtn.addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); initAudio(); if (G.playing && !G.paused) leaveBasket(); });
 
 // ---------------------------------------------------------------------------
 // Matilda's power
@@ -512,6 +525,7 @@ function magicStream(from, to, color = '#c084ff', n = 14) {
 }
 function usePower() {
   if (G.frozen > 0 || G.done) return;
+  if (G.hidden) { leaveBasket(); return; }
   if (G.power > 0) { play('fizzle'); bump(powerBtn); return; }
   const eye = M.pos.clone().setY(1.25);
   M.glow = 1.2;
@@ -624,8 +638,8 @@ const screens = ['start', 'story', 'complete', 'win', 'pause'].reduce((o, id) =>
 function show(id) { for (const k in screens) screens[k].classList.toggle('show', k === id); document.body.classList.toggle('playing', !id); }
 function loadProgress() { try { return +localStorage.getItem('ellie-chase-level') || 0; } catch (_) { return 0; } }
 function saveProgress(n) { try { localStorage.setItem('ellie-chase-level', String(Math.max(n, loadProgress()))); } catch (_) { /* private mode */ } }
-function startLevel(i) {
-  buildLevel(i);
+function startLevel(i, seed) {
+  buildLevel(i, seed);
   document.getElementById('storyTitle').textContent = `Level ${i + 1}: ${LEVELS[i].name}`;
   document.getElementById('storyText').textContent = LEVELS[i].intro;
   show('story');
@@ -655,6 +669,7 @@ function caught() {
   document.getElementById('caught').classList.add('show');
   later(1.5, () => {
     document.getElementById('caught').classList.remove('show');
+    if (G.hidden) { G.hidden = false; G.hideB = null; document.body.classList.remove('hiding'); }
     M.pos.copy(centre(...G.cpTile));
     M.obj.position.copy(M.pos);
     resetTrunchbull(false);
@@ -730,8 +745,15 @@ function update(dt) {
 function updateMatilda(dt) {
   if (G.grace > 0) G.grace -= dt;
   if (G.power > 0) G.power = Math.max(0, G.power - dt);
-  const inp = G.frozen > 0 ? { x: 0, y: 0, m: 0 } : inputVector();
+  let inp = G.frozen > 0 ? { x: 0, y: 0, m: 0 } : inputVector();
   if (G.frozen > 0) G.frozen -= dt;
+  if (G.hideCool > 0) G.hideCool -= dt;
+  if (G.hidden) {
+    // inside a basket the joystick looks left and right through the peephole; GET OUT climbs out
+    G.peekYaw = clamp(G.peekYaw - inp.x * dt * 1.6, -1.1, 1.1);
+    if (inp.m > 0.6 && Math.abs(inp.y) > 0.6 && (!G.outNag || G.time - G.outNag > 1.6)) { G.outNag = G.time; bump(outBtn); }
+    inp = { x: 0, y: 0, m: 0 };
+  }
   const f = new THREE.Vector3(Math.sin(camState.yaw), 0, Math.cos(camState.yaw));
   const rgt = new THREE.Vector3(-Math.cos(camState.yaw), 0, Math.sin(camState.yaw));
   const move = f.multiplyScalar(inp.y).add(rgt.multiplyScalar(inp.x));
@@ -742,10 +764,17 @@ function updateMatilda(dt) {
     const want = Math.atan2(move.x, move.z);
     M.yaw += angDiff(M.yaw, want) * Math.min(1, dt * 12);
   }
-  collide(M.pos, M_R, false);
+  if (!G.hidden) collide(M.pos, M_R, false);
   M.speed += (sp - M.speed) * Math.min(1, dt * 10);
   M.obj.position.copy(M.pos);
   M.obj.rotation.y = M.yaw;
+  if (M.hopT > 0) {
+    // hopping out of a basket
+    M.hopT = Math.max(0, M.hopT - dt);
+    const k = M.hopT / 0.4;
+    M.obj.position.lerp(M.hopFrom, k);
+    M.obj.position.y += Math.sin((1 - k) * Math.PI) * 0.7 + k * 0.3;
+  }
 
   // walk cycle
   const u = M.obj.userData;
@@ -757,36 +786,30 @@ function updateMatilda(dt) {
     u.armL.rotation.x = -Math.sin(M.phase) * sw * 0.9 + powerArm;
     u.armR.rotation.x = Math.sin(M.phase) * sw * 0.9 + powerArm;
   }
-  M.obj.position.y = Math.abs(Math.sin(M.phase)) * 0.06 * sw;
+  if (M.hopT <= 0) M.obj.position.y = Math.abs(Math.sin(M.phase)) * 0.06 * sw;
   if (M.speed > 1) { M.stepAcc += dt * M.speed; if (M.stepAcc > 1.4) { M.stepAcc = 0; play('step'); } }
   // glowing eyes while using her power
   M.glow = Math.max(0, M.glow - dt);
   if (u.eyeMats) for (const m of u.eyeMats) { m.emissive && m.emissive.set('#b05cff'); m.emissiveIntensity = M.glow > 0 ? 2.5 : 0; }
   // blink while protected after being caught
-  M.obj.visible = !(G.grace > 0 && Math.floor(t2() * 8) % 2 === 0);
+  showMatilda(!(G.grace > 0 && Math.floor(t2() * 8) % 2 === 0));
 
   const [tx, tz] = tileOf(M.pos.x, M.pos.z);
-  // hiding in a wardrobe
-  const wasHidden = G.hidden;
-  G.hidden = cell(tx, tz) === 'H';
-  if (G.hidden && !wasHidden) { play('creak'); showBanner('Shhh... you are hiding!', 2, true); }
-  document.body.classList.toggle('hiding', G.hidden);
-  G.hideCb = null;
-  for (const c of G.cupboards) {
-    const inside = G.hidden && c.tile[0] === tx && c.tile[1] === tz;
-    if (inside) G.hideCb = c;
-    c.open += ((inside ? 0.55 : 0.3) - c.open) * Math.min(1, dt * 6);
-    const ud = c.obj.userData;
-    if (ud.doorL) ud.doorL.rotation.y = -c.open * 1.6;
-    if (ud.doorR) ud.doorR.rotation.y = c.open * 1.6;
-    c.glow.material.opacity = inside ? 0.05 : 0.18 + Math.sin(t2() * 3) * 0.08;
-    if (inside) {
-      // tuck Matilda inside, out of sight
-      M.obj.position.lerp(c.inside, 0.5);
-      M.obj.visible = false;
-    }
-    if (!inside && c.obj.position.distanceTo(M.pos) < 6) tip('hide', 'Wardrobes are hiding places. Walk inside to hide!');
+  // walk into a basket to hide in it
+  if (!G.hidden && cell(tx, tz) === 'H' && G.hideCool <= 0 && G.frozen <= 0) {
+    const b = G.baskets.find((k) => k.tile[0] === tx && k.tile[1] === tz);
+    if (b) enterBasket(b);
   }
+  for (const b of G.baskets) {
+    const inside = G.hideB === b;
+    const near = !G.hidden && b.obj.position.distanceTo(M.pos) < 2.4 && G.time - G.outT > 1.5;
+    // the lid lifts as Matilda comes close, and drops shut once she's in
+    b.open += ((inside ? 0.12 : near ? 0.75 : 0) - b.open) * Math.min(1, dt * 7);
+    if (b.obj.userData.lid) b.obj.userData.lid.rotation.x = -b.open;
+    b.glow.material.opacity = inside ? 0 : 0.2 + Math.sin(t2() * 3) * 0.1;
+    if (!G.hidden && b.obj.position.distanceTo(M.pos) < 7) tip('hide', 'Baskets are hiding places. Walk into one to hide!');
+  }
+  if (G.hidden) { showMatilda(false); M.pos.copy(G.hideB.obj.position); }
   // books
   for (const b of G.books) {
     if (b.got) continue;
@@ -825,6 +848,45 @@ function updateMatilda(dt) {
   }
 }
 const t2 = () => G.time;
+// hide or show Matilda but keep her lantern lit, so it's never pitch dark inside a basket
+function showMatilda(v) { for (const c of M.obj.children) if (c !== M.light) c.visible = v; }
+
+function enterBasket(b) {
+  G.hidden = true; G.hideB = b; G.peekYaw = 0;
+  M.speed = 0;
+  play('creak');
+  document.body.classList.add('hiding');
+  const how = TOUCH ? 'Tap GET OUT when it\'s safe.' : 'Press Space to get out.';
+  showBanner(G.hideCount++ < 3 ? `Shhh... you're hiding! ${how}` : 'Shhh... hiding!', 3, true);
+}
+function leaveBasket() {
+  if (!G.hidden || G.frozen > 0) return;
+  const b = G.hideB, [tx, tz] = b.tile;
+  // climb out on the side Matilda was looking at
+  const yaw = b.obj.rotation.y + G.peekYaw;
+  const view = [Math.sin(yaw), Math.cos(yaw)];
+  let best = null, bd = -9;
+  for (const [dx, dz] of [[0, -1], [1, 0], [0, 1], [-1, 0]]) {
+    if (blocked(tx + dx, tz + dz) || cell(tx + dx, tz + dz) === 'H') continue;
+    const d = dx * view[0] + dz * view[1];
+    if (d > bd) { bd = d; best = [dx, dz]; }
+  }
+  if (!best) return;
+  G.hidden = false; G.hideB = null; G.hideCool = 0.6; G.grace = Math.max(G.grace, 0.6);
+  document.body.classList.remove('hiding');
+  bannerQ = []; bannerT = 0;
+  M.hopFrom.copy(b.obj.position).setY(0.3);
+  M.pos.copy(centre(tx, tz)).add(new THREE.Vector3(best[0] * (TILE / 2 + 0.5), 0, best[1] * (TILE / 2 + 0.5)));
+  collide(M.pos, M_R, false);
+  M.yaw = yawTo(...best);
+  M.hopT = 0.4;
+  G.outT = G.time;
+  showMatilda(true);
+  play('pop');
+  // put the camera straight behind her, looking the way she's going
+  camState.yaw = M.yaw;
+  camState.snap = true;
+}
 
 function unlockExit() {
   G.unlocked = true;
@@ -946,7 +1008,7 @@ function startChase() {
   T.state = 'chase'; T.lost = 0;
   play('spot');
   say(T.obj, pick(LINES.spot), 1.8);
-  tip('spotted', "She's seen you! Run away, hide in a wardrobe, or tap POWER!", true);
+  tip('spotted', "She's seen you! Run away, hide in a basket, or tap POWER!", true);
 }
 function followPath(goal, dt) {
   T.pathT -= dt;
@@ -1081,29 +1143,33 @@ function updateCamera(dt) {
   const f = new THREE.Vector3(Math.sin(camState.yaw), 0, Math.cos(camState.yaw));
   const rgt = new THREE.Vector3(-Math.cos(camState.yaw), 0, Math.sin(camState.yaw));
   const pivot = M.pos.clone().setY(1.35);
-  const back = G.hidden ? 4.4 : 3.6;
+  const back = 3.6;
   const want = pivot.clone().addScaledVector(f, -back).addScaledVector(rgt, 0.75).add(new THREE.Vector3(0, 1.05, 0));
   // pull in so walls never come between the camera and Matilda
   const steps = 24;
   let ok = pivot.clone();
   for (let k = 1; k <= steps; k++) {
-    const p = pivot.clone().lerp(want, k / steps);
+    // pull in sideways only, keeping the height, so the camera looks down over low things like baskets
+    const p = pivot.clone().lerp(want, k / steps).setY(want.y);
     const [tx, tz] = tileOf(p.x, p.z);
     const c = cell(tx, tz);
     if (c === '#' || c === 'G' || c === 'S' || c === 'E' || (c === 'X' && p.y < 2.6)) break;
     ok = p;
   }
-  ok.lerp(pivot, 0.08);
+  ok.lerp(pivot.clone().setY(ok.y), 0.08);
   let look = pivot.clone().addScaledVector(f, 2.4).addScaledVector(rgt, 0.3).add(new THREE.Vector3(0, -0.1, 0));
-  if (G.hidden && G.hideCb) {
-    // peek out through the gap in the wardrobe doors
-    const cb = G.hideCb.obj;
-    ok = cb.localToWorld(new THREE.Vector3(0, 1.3, 0.2));
-    look = cb.localToWorld(new THREE.Vector3(0, 1.1, 6));
-    camState.yaw += angDiff(camState.yaw, cb.rotation.y) * Math.min(1, dt * 4);
+  if (G.hidden && G.hideB) {
+    // peek out through the gap in the basket's weave; the joystick turns the view a little
+    const b = G.hideB.obj, a = G.peekYaw;
+    const fw = new THREE.Vector3(Math.sin(a), 0, Math.cos(a));
+    ok = b.localToWorld(fw.clone().multiplyScalar(0.78).setY(0.82));
+    look = b.localToWorld(fw.clone().multiplyScalar(8).setY(2.2));
+    camState.yaw = b.rotation.y + a;
   }
-  camState.pos.lerp(ok, Math.min(1, dt * 8));
-  camState.look.lerp(look, Math.min(1, dt * 10));
+  const k = camState.snap || (G.hidden && camState.pos.distanceTo(ok) < 2.5) ? 1 : Math.min(1, dt * 8);
+  camState.pos.lerp(ok, k);
+  camState.look.lerp(look, camState.snap ? 1 : Math.min(1, dt * 10));
+  camState.snap = false;
   camera.position.copy(camState.pos);
   if (camState.shake > 0) {
     camState.shake = Math.max(0, camState.shake - dt * 0.6);
@@ -1144,4 +1210,4 @@ requestAnimationFrame(loop);
 document.body.classList.add('ready');
 
 // handy for automated tests
-window.__game = { camState, camYaw: () => camState.yaw, G, M, T, update, render: () => renderer.render(scene, camera), startLevel, beginPlay, usePower, joy, keys, info: () => renderer.info.render, findPath, centre, tileOf, LEVELS, stunTrunchbull, caught };
+window.__game = { camState, camYaw: () => camState.yaw, G, M, T, update, render: () => renderer.render(scene, camera), startLevel, beginPlay, usePower, leaveBasket, generateMap, joy, keys, info: () => renderer.info.render, findPath, centre, tileOf, LEVELS, stunTrunchbull, caught };

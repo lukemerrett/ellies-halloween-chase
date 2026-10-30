@@ -3,7 +3,7 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { mat, matU, basic, makeGlow, rng } from './materials.js';
+import { mat, matU, basic, makeGlow, glowTexture, rng } from './materials.js';
 
 const cache = new Map();
 function geo(key, make) {
@@ -623,5 +623,121 @@ export function makeGate() {
     g.add(box(stone, 0.3, 3.3, 0.36, s * 1.35, 1.65, 0));
     g.add(box(stone, 0.4, 0.2, 0.46, s * 1.35, 3.4, 0));
   }
+  return g;
+}
+
+// ---------------------------------------------------------------------------
+// Wicker laundry basket to hide in (about 1.3 wide and 1.1 tall).
+// The lid hinges at the back; a slot in the front weave lets you peek out from inside,
+// from the camera spot in userData.peek (local coordinates, looking towards +Z).
+// ---------------------------------------------------------------------------
+let weaveMat = null;
+function wickerMaterial() {
+  if (weaveMat) return weaveMat;
+  const c = document.createElement('canvas');
+  c.width = 128; c.height = 64;
+  const x = c.getContext('2d');
+  x.fillStyle = '#4a3018'; x.fillRect(0, 0, 128, 64);
+  // over-and-under strands: each row of short rounded strands is offset from the one above
+  for (let row = 0; row < 8; row++) {
+    for (let k = 0; k < 8; k++) {
+      const sx = k * 16 + (row % 2) * 8, sy = row * 8;
+      const gr = x.createLinearGradient(0, sy, 0, sy + 7);
+      gr.addColorStop(0, '#d9ab6a'); gr.addColorStop(0.45, '#b98a4e'); gr.addColorStop(1, '#7c5730');
+      x.fillStyle = gr;
+      for (const dx of [0, -128]) {
+        x.beginPath();
+        x.roundRect(sx + dx + 1, sy + 0.5, 14, 7, 3.5);
+        x.fill();
+      }
+    }
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  weaveMat = new THREE.MeshStandardMaterial({ map: t, roughness: 0.9, side: THREE.DoubleSide });
+  return weaveMat;
+}
+// one band of the basket wall from y0 to y1, optionally with an opening `gap` radians wide at the front;
+// UVs are set from the angle and height so every band shares the same weave scale
+function wickerBand(m, r0, r1, H, y0, y1, gap = 0) {
+  const seg = 40;
+  const ra = r0 + (r1 - r0) * (y0 / H), rb = r0 + (r1 - r0) * (y1 / H);
+  const g = new THREE.CylinderGeometry(rb, ra, y1 - y0, seg, 1, true, gap / 2, Math.PI * 2 - gap);
+  const p = g.attributes.position, uv = g.attributes.uv;
+  for (let i = 0; i < p.count; i++) {
+    const j = i % (seg + 1);
+    const th = gap / 2 + (j / seg) * (Math.PI * 2 - gap);
+    uv.setXY(i, (th / (Math.PI * 2)) * 9, ((p.getY(i) + (y0 + y1) / 2) / H) * 6);
+  }
+  g.translate(0, (y0 + y1) / 2, 0);
+  return mesh(g, m);
+}
+export function makeBasket() {
+  const g = new THREE.Group();
+  const weave = wickerMaterial();
+  const cane = mat('#9a6d3c', { roughness: 0.8 });
+  const caneDark = mat('#6e4a26', { roughness: 0.85 });
+  const R0 = 0.56, R1 = 0.65, H = 1.0;
+  const SLOT = 1.25, S0 = 0.6, S1 = 0.9;           // the peek slot: about 0.75 wide and 0.3 tall
+  const rAt = (y) => R0 + (R1 - R0) * (y / H);
+  g.add(wickerBand(weave, R0, R1, H, 0, S0));
+  g.add(wickerBand(weave, R0, R1, H, S0, S1, SLOT));
+  g.add(wickerBand(weave, R0, R1, H, S1, H));
+  g.add(mesh(geo('bfloor', () => new THREE.CircleGeometry(R0, 28).rotateX(-Math.PI / 2)), basic('#120a06'), 0, 0.03, 0));
+  // thick cane rims, bands and the edges of the slot
+  const ring = (r, tube, y, m, gap = 0) => {
+    const o = mesh(geo(`bring${r.toFixed(3)},${tube},${gap}`, () => new THREE.TorusGeometry(r, tube, 6, 36, Math.PI * 2 - gap)), m, 0, y, 0);
+    o.rotation.set(Math.PI / 2, 0, Math.PI / 2 + gap / 2);
+    return o;
+  };
+  g.add(ring(R1 + 0.01, 0.045, H, cane));
+  g.add(ring(R1 + 0.045, 0.018, H - 0.03, caneDark));
+  g.add(ring(R0 + 0.01, 0.04, 0.04, caneDark));
+  g.add(ring(rAt(0.32) + 0.01, 0.02, 0.32, cane));
+  g.add(ring(rAt(S0) + 0.015, 0.03, S0, cane, SLOT));
+  g.add(ring(rAt(S1) + 0.015, 0.03, S1, cane, SLOT));
+  // upright stakes, left out across the slot
+  for (let k = 0; k < 18; k++) {
+    const th = (k / 18) * Math.PI * 2 + Math.PI / 18;
+    const inSlot = Math.abs(Math.atan2(Math.sin(th), Math.cos(th))) < SLOT / 2 + 0.05;
+    const at = (y) => new THREE.Vector3(Math.sin(th) * (rAt(y) + 0.012), y, Math.cos(th) * (rAt(y) + 0.012));
+    const spans = inSlot ? [[0.04, S0], [S1, H]] : [[0.04, H]];
+    for (const [a, b] of spans) g.add(rod(caneDark, at(a), at(b), 0.012));
+  }
+  // the slot's side posts
+  for (const s of [-1, 1]) {
+    const th = s * SLOT / 2;
+    const at = (y) => new THREE.Vector3(Math.sin(th) * (rAt(y) + 0.01), y, Math.cos(th) * (rAt(y) + 0.01));
+    g.add(rod(cane, at(S0), at(S1), 0.026));
+  }
+  // rope handles on each side
+  for (const s of [-1, 1]) {
+    const h = mesh(geo('bhandle', () => new THREE.TorusGeometry(0.1, 0.022, 6, 14, Math.PI)), cane, s * (rAt(0.82) - 0.02), 0.82, 0);
+    h.rotation.z = -s * Math.PI / 2;
+    g.add(h);
+  }
+  // lid: a shallow woven dome on a pivot at the back rim; rotate x negative to lift it
+  const lid = new THREE.Group();
+  lid.position.set(0, H + 0.02, -R1);
+  const top = mesh(geo('blidtop', () => new THREE.SphereGeometry(R1 + 0.04, 32, 8, 0, Math.PI * 2, 0, Math.PI * 0.5)), weave, 0, 0.0, R1);
+  top.scale.y = 0.22;
+  lid.add(top);
+  const lr = mesh(geo('blidrim', () => new THREE.TorusGeometry(R1 + 0.035, 0.035, 6, 36)), cane, 0, 0.01, R1);
+  lr.rotation.x = Math.PI / 2;
+  lid.add(lr);
+  const knob = mesh(geo('bknob', () => new THREE.TorusGeometry(0.06, 0.018, 6, 12, Math.PI)), cane, 0, 0.14, R1);
+  lid.add(knob);
+  g.add(lid);
+
+  // a soft glow on the floor marks a hiding place
+  const glow = new THREE.Mesh(
+    geo('bglow', () => new THREE.PlaneGeometry(2.6, 2.6).rotateX(-Math.PI / 2)),
+    new THREE.MeshBasicMaterial({ map: glowTexture(), color: '#8fe3ff', transparent: true, opacity: 0.45, depthWrite: false, blending: THREE.AdditiveBlending }),
+  );
+  glow.position.y = 0.02;
+  g.add(glow);
+
+  g.userData = { lid, glow, peek: new THREE.Vector3(0, 0.75, 0.32) };
   return g;
 }
